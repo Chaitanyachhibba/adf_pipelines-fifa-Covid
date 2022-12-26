@@ -1,0 +1,9 @@
+{
+	"name": "df2903",
+	"location": "canadaeast",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "9bff6b7f-8ea4-42ba-807f-272fe3945f85",
+		"tenantId": "50e662fd-3f4d-4dd3-b866-91490b01bf0d"
+	}
+}

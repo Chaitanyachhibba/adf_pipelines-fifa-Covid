@@ -1,0 +1,140 @@
+{
+	"name": "df_fifa",
+	"properties": {
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "ds_fifacsv",
+						"type": "DatasetReference"
+					},
+					"name": "sourceNewFile"
+				},
+				{
+					"dataset": {
+						"referenceName": "ds_SQLfifiaDB",
+						"type": "DatasetReference"
+					},
+					"name": "sourceExistingDB"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "ds_SQLfifiaDB",
+						"type": "DatasetReference"
+					},
+					"name": "sinkToSQLdb"
+				}
+			],
+			"transformations": [
+				{
+					"name": "CalculateNewHashValues"
+				},
+				{
+					"name": "CalculateExistingHashValues"
+				},
+				{
+					"name": "CheckForNewData"
+				},
+				{
+					"name": "AddsurrogateKey"
+				},
+				{
+					"name": "aggregateMaxSkey"
+				},
+				{
+					"name": "joinMaxSkey"
+				},
+				{
+					"name": "CalculateExtraColumnSKey"
+				},
+				{
+					"name": "selectRemoveHashColumns"
+				},
+				{
+					"name": "UpdateExistingData"
+				},
+				{
+					"name": "ChangeUpdatedStatus"
+				},
+				{
+					"name": "selectRelevantColumnsForUpdate"
+				},
+				{
+					"name": "InsertSet"
+				},
+				{
+					"name": "UpdateSet"
+				},
+				{
+					"name": "unionInsertAndUPdate"
+				}
+			],
+			"scriptLines": [
+				"parameters{",
+				"     parameter_ID as string ('ID'),",
+				"     parameter_SCD as string ('Club,Wage,Position')",
+				"}",
+				"source(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     ignoreNoFilesFound: false) ~> sourceNewFile",
+				"source(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     format: 'table') ~> sourceExistingDB",
+				"sourceNewFile derive(ID_Hash = md5(byName($parameter_ID)),",
+				"          SCD_Hash = md5(byNames(split($parameter_SCD,',')))) ~> CalculateNewHashValues",
+				"sourceExistingDB derive(ID_Hash = md5(byName($parameter_ID)),",
+				"          SCD_Hash = md5(byNames(split($parameter_SCD,',')))) ~> CalculateExistingHashValues",
+				"CalculateNewHashValues, CalculateExistingHashValues exists(CalculateNewHashValues@ID_Hash == CalculateExistingHashValues@ID_Hash",
+				"     && CalculateNewHashValues@SCD_Hash == CalculateExistingHashValues@SCD_Hash,",
+				"     negate:true,",
+				"     broadcast: 'auto')~> CheckForNewData",
+				"CheckForNewData keyGenerate(output(SKey as long),",
+				"     startAt: 1L,",
+				"     stepValue: 1L) ~> AddsurrogateKey",
+				"CalculateExistingHashValues aggregate(MaxSkey = max(toInteger('Skey'))) ~> aggregateMaxSkey",
+				"AddsurrogateKey, aggregateMaxSkey join(MaxSkey==SKey||true(),",
+				"     joinType:'cross',",
+				"     matchType:'exact',",
+				"     ignoreSpaces: false,",
+				"     broadcast: 'auto')~> joinMaxSkey",
+				"joinMaxSkey derive(SKey = SKey+iifNull(MaxSkey,0),",
+				"          Active = 1,",
+				"          ActiveStartTime = currentUTC(),",
+				"          ActiveEndTime = toTimestamp(toString(null()))) ~> CalculateExtraColumnSKey",
+				"CalculateExtraColumnSKey select(mapColumn(",
+				"          each(match(name!='ID_Hash'&&name!='SCD_Hash'&&name!='MaxSkey'))",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> selectRemoveHashColumns",
+				"CalculateExistingHashValues, CheckForNewData exists(CalculateExistingHashValues@ID_Hash == CalculateNewHashValues@ID_Hash,",
+				"     negate:false,",
+				"     broadcast: 'auto')~> UpdateExistingData",
+				"UpdateExistingData derive(Active = 0,",
+				"          ActiveEndTime = currentUTC()) ~> ChangeUpdatedStatus",
+				"ChangeUpdatedStatus select(mapColumn(",
+				"          each(match(name!='ID_Hash'&&name!='SCD_Hash'&&name!='MaxSkey'))",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> selectRelevantColumnsForUpdate",
+				"selectRemoveHashColumns alterRow(insertIf(true())) ~> InsertSet",
+				"selectRelevantColumnsForUpdate alterRow(updateIf(true())) ~> UpdateSet",
+				"InsertSet, UpdateSet union(byName: true)~> unionInsertAndUPdate",
+				"unionInsertAndUPdate sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     deletable:false,",
+				"     insertable:true,",
+				"     updateable:true,",
+				"     upsertable:false,",
+				"     keys:[($parameter_ID)],",
+				"     format: 'table',",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError') ~> sinkToSQLdb"
+			]
+		}
+	}
+}
